@@ -1,29 +1,32 @@
 // ChainKit as an MCP server, wired into an agent
 //
 // Before running this, start the ChainKit MCP server in another terminal:
-//   npx -y @avalanche-sdk/chainkit mcp-server
-// It will print the local URL it's running on, e.g. http://localhost:PORT/mcp
-// Put that URL in CHAINKIT_MCP_URL in your .env.
+//   npx -y @avalanche-sdk/chainkit start --transport sse --port 3000
+// (or: npm run chainkit-mcp-server)
+// It serves the SSE transport at http://localhost:3000/sse — put that URL
+// in CHAINKIT_MCP_URL in your .env.
 //
 // This agent then asks a plain-English question, the model decides to
 // call a ChainKit tool, and the tool call is forwarded straight to the
-// running MCP server, no manual SDK calls in this file at all.
+// running MCP server, no manual SDK calls in this file at all. Works with
+// any tool-capable provider (anthropic or openai) — the model-provider
+// layer normalizes tool calls to one shape.
 
 import "dotenv/config";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { createModelClient } from "./model-provider.js";
 
 const SYSTEM_PROMPT = "You are Mini Hack Assistant. Use tools when they genuinely help; otherwise answer directly.";
 
 async function connectChainkitMcp() {
   const url = process.env.CHAINKIT_MCP_URL;
-  if (!url) throw new Error("Set CHAINKIT_MCP_URL in your .env first, from the running mcp-server output.");
+  if (!url) throw new Error("Set CHAINKIT_MCP_URL in your .env first, e.g. http://localhost:3000/sse from the running mcp-server.");
 
   const mcpClient = new Client({ name: "mini-hack-agent", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+  const transport = new SSEClientTransport(new URL(url));
   await mcpClient.connect(transport);
   return mcpClient;
 }
@@ -46,25 +49,25 @@ async function main() {
 
     let response = await client.generateText({ systemPrompt: SYSTEM_PROMPT, messages, tools });
 
-    while (response.stopReason === "tool_use") {
-      messages.push({ role: "assistant", content: response.raw.content });
+    while (response.toolCalls.length > 0) {
+      messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
 
       const toolResults = [];
       for (const call of response.toolCalls) {
         try {
           const result = await mcpClient.callTool({ name: call.name, arguments: call.input });
-          toolResults.push({ type: "tool_result", tool_use_id: call.id, content: JSON.stringify(result.content) });
+          toolResults.push({ id: call.id, name: call.name, content: JSON.stringify(result.content) });
         } catch (err) {
-          toolResults.push({ type: "tool_result", tool_use_id: call.id, content: `Error: ${err.message}`, is_error: true });
+          toolResults.push({ id: call.id, name: call.name, content: `Error: ${err.message}`, isError: true });
         }
       }
 
-      messages.push({ role: "user", content: toolResults });
+      messages.push({ role: "tool", toolResults });
       response = await client.generateText({ systemPrompt: SYSTEM_PROMPT, messages, tools });
     }
 
     console.log(`\nAssistant: ${response.text}\n`);
-    messages.push({ role: "assistant", content: response.raw.content });
+    messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
   }
 
   rl.close();

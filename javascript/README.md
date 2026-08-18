@@ -47,14 +47,16 @@ npm run rag -- "your question"            # Session 5: the RAG agent, needs Chro
 ```
 
 For `mcp-agent`, start the ChainKit MCP server in another terminal
-first:
+first (its CLI route is `start`, over the SSE transport):
 
 ```bash
-npx -y @avalanche-sdk/chainkit mcp-server
+npx -y @avalanche-sdk/chainkit start --transport sse --port 3000
+# or, equivalently:
+npm run chainkit-mcp-server
 ```
 
-It prints the local URL it's running on. Put that in `CHAINKIT_MCP_URL`
-in your `.env` before running the agent.
+It serves the SSE transport at `http://localhost:3000/sse`. Put that URL
+in `CHAINKIT_MCP_URL` in your `.env` before running the agent.
 
 For `rag`, Chroma needs to be running first, either via
 `docker compose up -d chroma` from the repo root, or locally with
@@ -73,11 +75,13 @@ embeddings API directly, this all happens inside the `chromadb` package.
 
 Same as Session 2: `MODEL_PROVIDER` in `.env` picks the provider
 (`anthropic`, `openai`, `gemini`, or `ollama`), defaulting to
-`anthropic` if unset. Only the Anthropic path implements tool calling,
-required for `chainkit-mcp-agent.js` to work at all, the other three are
-plain text chat. This doesn't affect `rag.js`, which doesn't use tools,
-it just calls whichever provider you have active for a normal grounded
-answer.
+`anthropic` if unset. The `anthropic` and `openai` paths both implement
+tool calling, required for `chainkit-mcp-agent.js` to work — the
+model-provider layer normalizes tool calls to one shape, so the agent
+runs the same on either. `gemini` and `ollama` are plain text chat for
+now (they accept a `tools` argument but ignore it). This doesn't affect
+`rag.js`, which doesn't use tools — it just calls whichever provider you
+have active for a normal grounded answer.
 
 ## Submission
 

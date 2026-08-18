@@ -4,7 +4,7 @@
 // no manual RPC parsing. Needs a free Glacier API key from avacloud.io.
 
 import "dotenv/config";
-import { AvalancheSDK } from "@avalanche-sdk/chainkit";
+import { Avalanche } from "@avalanche-sdk/chainkit";
 import { normalizeMany } from "./normalize.js";
 
 async function main() {
@@ -13,9 +13,9 @@ async function main() {
   if (!walletAddress) throw new Error("Set WALLET_ADDRESS in your .env first.");
   if (!apiKey) throw new Error("Set GLACIER_API_KEY in your .env first. Get a free one at avacloud.io.");
 
-  const avalancheSDK = new AvalancheSDK({ apiKey });
+  const avalanche = new Avalanche({ apiKey });
 
-  const { transactions } = await avalancheSDK.data.evm.transactions.listTransactions({
+  const { transactions } = await avalanche.data.evm.transactions.listTransactions({
     chainId: "43113", // Fuji testnet
     address: walletAddress,
     pageSize: 10,

@@ -1,0 +1,49 @@
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+
+# --- Node / JavaScript ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# --- Go ---
+# compiled binaries produced by the starters (e.g. ./rag, ./direct-rpc)
+/golang/rag
+/golang/direct-rpc
+/golang/chainkit-fetch
+/golang/advisor
+/golang/chainkit-mcp-agent
+
+# --- Rust ---
+/rust/target/
+
+# --- Chroma / local vector store data ---
+chroma/
+chroma_data/
+*.sqlite3
+
+# --- Logs ---
+*.log
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

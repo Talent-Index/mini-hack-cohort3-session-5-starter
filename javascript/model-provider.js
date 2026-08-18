@@ -19,17 +19,123 @@
 //   stopReason — the provider's own reason string, kept as-is, not normalized
 //   raw        — the full untouched response, in case you need provider-specific detail
 //
-// TOOL-CALLING SUPPORT — READ THIS BEFORE SESSION 2
-// Only the Anthropic client below implements tools. OpenAI, Gemini, and
-// Ollama clients accept a `tools` argument without erroring, but ignore it
-// and always return toolCalls: []. Each provider's function-calling API
-// shape is different enough (Anthropic's content blocks vs. OpenAI's
-// tool_calls array vs. Gemini's functionCall parts) that fully normalizing
-// all four is real work, not a quick add. If your Week 1 agent needs
-// tools — and it does, that's the deliverable — build it on "anthropic"
-// until the others catch up.
+// MESSAGE FORMAT — provider-neutral, translated per provider
+// Callers speak ONE shape, and each client translates it to its own wire
+// format. A message is one of:
+//   { role: "user",      content: "text" }
+//   { role: "assistant", content: "text", toolCalls: [{ id, name, input }] }
+//   { role: "tool",      toolResults: [{ id, name, content, isError }] }
+// `tools` is the raw MCP tool list ([{ name, description, inputSchema }]);
+// each client converts it to the provider's tool schema, so the agent never
+// hand-writes Anthropic's input_schema or OpenAI's function wrappers.
+//
+// TOOL-CALLING SUPPORT
+// The Anthropic and OpenAI clients both implement tools end to end: they
+// accept `tools`, translate the schema, forward tool calls, and normalize
+// the response back to toolCalls: [{ id, name, input }]. Gemini and Ollama
+// accept a `tools` argument without erroring but ignore it and always
+// return toolCalls: [] — their function-calling shapes aren't wired up yet.
+// stopReason is normalized to "tool_use" whenever the model asked for a
+// tool, so an agent loop can branch on it regardless of provider.
 
 const SUPPORTED_PROVIDERS = ["anthropic", "openai", "gemini", "ollama"];
+
+// ---------------------------------------------------------------------------
+// Message + tool translators: provider-neutral shape -> provider wire format
+// ---------------------------------------------------------------------------
+
+function safeJsonParse(str) {
+  if (!str) return {};
+  try {
+    return JSON.parse(str);
+  } catch {
+    return {};
+  }
+}
+
+function toAnthropicTools(tools) {
+  if (!tools?.length) return undefined;
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.inputSchema ??
+      tool.input_schema ?? { type: "object", properties: {} },
+  }));
+}
+
+function toAnthropicMessages(messages) {
+  return messages.map((message) => {
+    if (message.role === "tool") {
+      return {
+        role: "user",
+        content: message.toolResults.map((result) => ({
+          type: "tool_result",
+          tool_use_id: result.id,
+          content: result.content,
+          ...(result.isError ? { is_error: true } : {}),
+        })),
+      };
+    }
+
+    if (message.role === "assistant") {
+      const blocks = [];
+      if (message.content) blocks.push({ type: "text", text: message.content });
+      for (const call of message.toolCalls ?? []) {
+        blocks.push({
+          type: "tool_use",
+          id: call.id,
+          name: call.name,
+          input: call.input ?? {},
+        });
+      }
+      return { role: "assistant", content: blocks.length ? blocks : message.content ?? "" };
+    }
+
+    return { role: "user", content: message.content };
+  });
+}
+
+function toOpenAITools(tools) {
+  if (!tools?.length) return undefined;
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema ??
+        tool.input_schema ?? { type: "object", properties: {} },
+    },
+  }));
+}
+
+function toOpenAIMessages(messages) {
+  const out = [];
+  for (const message of messages) {
+    if (message.role === "tool") {
+      for (const result of message.toolResults) {
+        out.push({ role: "tool", tool_call_id: result.id, content: result.content });
+      }
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const entry = { role: "assistant", content: message.content ?? "" };
+      if (message.toolCalls?.length) {
+        entry.content = message.content || null;
+        entry.tool_calls = message.toolCalls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.name, arguments: JSON.stringify(call.input ?? {}) },
+        }));
+      }
+      out.push(entry);
+      continue;
+    }
+
+    out.push({ role: "user", content: message.content });
+  }
+  return out;
+}
 
 function getConfiguredProvider() {
   const provider =
@@ -103,8 +209,8 @@ async function createAnthropicClient() {
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
         max_tokens: Number(process.env.MAX_TOKENS || 1024),
         system: systemPrompt,
-        tools: tools ?? undefined,
-        messages,
+        tools: toAnthropicTools(tools),
+        messages: toAnthropicMessages(messages),
       });
 
       // Precise extraction, not the generic guesser below — we know this
@@ -135,19 +241,36 @@ async function createOpenAIClient() {
 
   return {
     provider: "openai",
-    async generateText({ systemPrompt, messages }) {
-      // Tool calling not yet implemented for this provider — see the note
-      // at the top of this file. Plain text chat only, for now.
+    async generateText({ systemPrompt, messages, tools }) {
       const response = await client.chat.completions.create({
         model: process.env.OPENAI_MODEL || "gpt-4.1",
         max_tokens: Number(process.env.MAX_TOKENS || 1024),
-        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...toOpenAIMessages(messages),
+        ],
+        tools: toOpenAITools(tools),
       });
 
+      const choice = response.choices?.[0];
+      const message = choice?.message;
+
+      // Normalize OpenAI's tool_calls (function name + JSON-string arguments)
+      // into the same { id, name, input } shape the Anthropic client returns.
+      const toolCalls = (message?.tool_calls ?? [])
+        .filter((call) => call.type === "function")
+        .map((call) => ({
+          id: call.id,
+          name: call.function.name,
+          input: safeJsonParse(call.function.arguments),
+        }));
+
       return {
-        text: normalizeResponse(response),
-        toolCalls: [],
-        stopReason: response.choices?.[0]?.finish_reason ?? "unknown",
+        text: message?.content ?? "",
+        toolCalls,
+        // Normalize to "tool_use" so agents can branch the same way they do
+        // for Anthropic; OpenAI's own reason for this is "tool_calls".
+        stopReason: toolCalls.length ? "tool_use" : choice?.finish_reason ?? "unknown",
         raw: response,
       };
     },

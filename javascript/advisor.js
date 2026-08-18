@@ -8,20 +8,20 @@
 // agent makes along the way.
 
 import "dotenv/config";
-import { AvalancheSDK } from "@avalanche-sdk/chainkit";
+import { Avalanche } from "@avalanche-sdk/chainkit";
 import { normalizeMany } from "./normalize.js";
 import { createModelClient } from "./model-provider.js";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-const avalancheSDK = new AvalancheSDK({ apiKey: process.env.GLACIER_API_KEY });
+const avalanche = new Avalanche({ apiKey: process.env.GLACIER_API_KEY });
 const rl = readline.createInterface({ input, output });
 
 // Step 1: fetch. Same ChainKit call as chainkit-fetch.js, just pulling
 // more history (50 transactions instead of 10) since a meaningful
 // summary needs more than a handful of data points to work with.
 async function getWalletHistory(walletAddress) {
-  const { transactions } = await avalancheSDK.data.evm.transactions.listTransactions({
+  const { transactions } = await avalanche.data.evm.transactions.listTransactions({
     chainId: "43113", // Fuji testnet
     address: walletAddress,
     pageSize: 50,
