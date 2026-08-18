@@ -2,12 +2,12 @@
 # The final image doesn't need the Rust toolchain at all, just the
 # compiled binaries, so it stays small.
 #
-# Pinned to rust:1.82. If a dependency update pushes the minimum
+# Pinned to rust:1.85. If a dependency update pushes the minimum
 # supported Rust version higher and this stops compiling, bump this tag
 # to a newer one, or run `rustup update` locally and check what you're
 # actually building with.
 
-FROM rust:1.82 AS builder
+FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./

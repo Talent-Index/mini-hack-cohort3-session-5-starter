@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
-    "@avalanche-sdk/chainkit": "^1.0.0",
+    "@avalanche-sdk/chainkit": "^0.3.13",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "chromadb": "^3.5.0",
     "dotenv": "^16.4.5",
